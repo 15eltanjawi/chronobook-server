@@ -2,12 +2,18 @@
 
 Relay server between:
 - the **Liveness Customer** Android app (`liveness-customer-android.apk`) — unmodified, no source available
-- the **Sweven BLS** Chrome extension (`bls-autofill-extension`)
+- whichever BLS automation captured the Oz Forensics session: the **Sweven BLS** Chrome
+  extension (`bls-autofill-extension`) when loaded as a real extension, *or* the
+  **bls-dashboard** Playwright bot (`bls-dashboard/launcher.js`), which runs the exact
+  same `main.js`/`content.js` files directly over CDP. Either one calls this server the
+  same way — see each project's own README for which one you're actually running.
 
-The app hands the customer's phone an already-logged-in BLS session (cookies + the
-appointment URL), lets the phone's WebView run BLS's own page and the real Oz Forensics
-liveness check with the phone's camera, then reports the outcome back here so the
-extension can confirm it and move on to payment.
+BLS's own page gets a `sessionToken`/`transactionId`/`webAdapterUrl` from Oz Forensics
+for the liveness check; the automation captures that (without requesting one of its
+own), hands it to this server, and this server relays it — encrypted — to the
+customer's phone. The phone completes the *same* Oz Forensics transaction with its own
+camera, and whichever automation is watching re-checks the real BLS page once the phone
+reports done, then moves on to payment.
 
 ## How this was built
 
