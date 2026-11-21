@@ -1,0 +1,18 @@
+{
+  "name": "chronobook-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Relay server for the Liveness Customer phone app and the Sweven BLS extension.",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}
