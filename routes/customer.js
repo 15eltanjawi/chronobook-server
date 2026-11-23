@@ -13,6 +13,11 @@ const router = express.Router();
 
 function taskPublic(task, { includePayload = true } = {}) {
   const body = {
+    // Confirmed from the app's own bytecode: a 2xx response is only accepted as
+    // valid if it has "ok": true at the top level - anything else (even a
+    // perfectly reasonable-looking JSON object) is rejected client-side as
+    // "Invalid task API response (HTTP 200)", regardless of its other fields.
+    ok: true,
     status: task.status,
     message: task.message || '',
   };
@@ -37,11 +42,13 @@ function taskPublic(task, { includePayload = true } = {}) {
 function loadTask(req, res) {
   const task = store.get(req.params.id);
   if (!task) {
-    res.status(404).json({ error: 'not_found' });
+    // This "error" string is shown to the person directly if present (confirmed
+    // from the app's bytecode), so it's written for them, not as a log code.
+    res.status(404).json({ error: 'This task is unavailable. Ask your operator for a fresh link.' });
     return null;
   }
   if (!safeEqual(req.body && req.body.access, task.access)) {
-    res.status(401).json({ error: 'unauthorized' });
+    res.status(401).json({ error: 'This link is not valid for this task. Ask your operator for a fresh link.' });
     return null;
   }
   if (task.expiresAt && Date.now() > task.expiresAt && task.status !== 'accepted') {
@@ -76,8 +83,9 @@ router.post('/:id/start', (req, res) => {
   task.sessions = task.sessions || {};
 
   if (task.pendingSession) {
-    // The extension already handed us the BLS cookies/URL for this task; seal them
-    // for this specific attempt now (the AAD binds the ciphertext to this attemptId).
+    // The extension already handed us the sessionToken/transactionId/webAdapterUrl
+    // for this task; seal them for this specific attempt now (the AAD binds the
+    // ciphertext to this attemptId).
     task.sessions[attemptId] = encryptSession(task.key, task.id, attemptId, task.pendingSession);
     task.status = 'preparing';
     task.message = 'Preparing the camera on the BLS page…';
@@ -94,7 +102,7 @@ router.post('/:id/report', (req, res) => {
   const task = loadTask(req, res);
   if (!task) return;
   if (!task.attemptId) {
-    res.status(409).json({ error: 'no_active_attempt' });
+    res.status(409).json({ error: 'There is no selfie attempt waiting for a result right now.' });
     return;
   }
 
