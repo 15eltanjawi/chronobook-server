@@ -11,6 +11,10 @@ const { randomId, encryptSession, safeEqual } = require('../lib/crypto');
 
 const router = express.Router();
 
+// Express 4 does not catch a rejected promise from an async handler on its own -
+// without this, a storage error would hang the request instead of answering it.
+const ah = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+
 function taskPublic(task, { includePayload = true } = {}) {
   const body = {
     // Confirmed from the app's own bytecode: a 2xx response is only accepted as
@@ -39,8 +43,8 @@ function taskPublic(task, { includePayload = true } = {}) {
   return body;
 }
 
-function loadTask(req, res) {
-  const task = store.get(req.params.id);
+async function loadTask(req, res) {
+  const task = await store.get(req.params.id);
   if (!task) {
     // This "error" string is shown to the person directly if present (confirmed
     // from the app's bytecode), so it's written for them, not as a log code.
@@ -54,19 +58,19 @@ function loadTask(req, res) {
   if (task.expiresAt && Date.now() > task.expiresAt && task.status !== 'accepted') {
     task.status = 'expired';
     task.message = 'This link has expired.';
-    store.put(task);
+    await store.put(task);
   }
   return task;
 }
 
-router.post('/:id/open', (req, res) => {
-  const task = loadTask(req, res);
+router.post('/:id/open', ah(async (req, res) => {
+  const task = await loadTask(req, res);
   if (!task) return;
   res.json(taskPublic(task));
-});
+}));
 
-router.post('/:id/start', (req, res) => {
-  const task = loadTask(req, res);
+router.post('/:id/start', ah(async (req, res) => {
+  const task = await loadTask(req, res);
   if (!task) return;
   if (task.status === 'expired' || task.status === 'accepted') {
     res.json(taskPublic(task));
@@ -94,12 +98,12 @@ router.post('/:id/start', (req, res) => {
     task.message = 'Waiting for the operator to hand off the session.';
   }
 
-  store.put(task);
+  await store.put(task);
   res.json(taskPublic(task));
-});
+}));
 
-router.post('/:id/report', (req, res) => {
-  const task = loadTask(req, res);
+router.post('/:id/report', ah(async (req, res) => {
+  const task = await loadTask(req, res);
   if (!task) return;
   if (!task.attemptId) {
     res.status(409).json({ error: 'There is no selfie attempt waiting for a result right now.' });
@@ -114,9 +118,9 @@ router.post('/:id/report', (req, res) => {
   task.status = 'submitted';
   task.message = 'Result sent. Waiting for your operator to verify it with BLS.';
   task.submittedAt = Date.now();
-  store.put(task);
+  await store.put(task);
 
   res.json(taskPublic(task, { includePayload: false }));
-});
+}));
 
 module.exports = router;

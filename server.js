@@ -51,7 +51,9 @@ app.use((req, res) => res.status(404).json({ error: 'not_found' }));
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
   console.error(err);
-  res.status(500).json({ error: 'internal_error' });
+  // This "error" string reaches the phone app directly (it shows it to the person
+  // as-is when a response isn't a success), so it's written for them, not as a log code.
+  res.status(500).json({ error: 'The task server had a problem. Try again in a moment.' });
 });
 
 setInterval(() => store.sweepExpired(), 60 * 60 * 1000);
@@ -64,5 +66,8 @@ app.listen(port, () => {
   }
   if (!process.env.PUBLIC_BASE_URL) {
     console.warn('WARNING: PUBLIC_BASE_URL is not set — links will use the request host, which is wrong behind some proxies.');
+  }
+  if (!store.configured()) {
+    console.warn('WARNING: UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN are not set — every task will fail to save.');
   }
 });

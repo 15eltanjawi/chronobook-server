@@ -47,6 +47,14 @@ AES-256-GCM scheme it uses) was recovered by disassembling `classes.dex` with
   This is why `bls-autofill-extension/main.js` captures BLS's own
   `sessionToken`/`transactionId`/`webAdapterUrl` response rather than this server
   minting its own — reusing BLS's own (short-lived) token is required, not optional.
+- **Every successful (2xx) response must include a literal `"ok": true` field.**
+  Found the hard way: the app rejected every well-formed response with "Invalid task
+  API response (HTTP 200)" until this was added, even though the JSON itself was
+  otherwise exactly right. Traced to `Lx/C.b` in the disassembly — a 2xx response is
+  only accepted when `ok === true`; anything else is treated as an error, using the
+  body's own `"error"` string if present (shown to the person directly) or a generic
+  message otherwise. Every route here sends `ok: true` on success and a real,
+  human-readable `"error"` string on failure.
 
 **This server's own design, not confirmed against the app** (test before relying on
 it in production — ideally against the real APK and a real BLS liveness session):
@@ -60,13 +68,28 @@ it in production — ideally against the real APK and a real BLS liveness sessio
 If the real app ever rejects something this server sends, the fix is almost always in
 `routes/customer.js` (the shapes going back to the app), not in the crypto.
 
+## Storage: Upstash Redis (not a local file)
+
+Tasks are stored in [Upstash](https://upstash.com)'s free Redis, over its plain-HTTPS
+REST API (`lib/store.js`). This mattered in practice: an earlier version kept tasks in
+a local JSON file, which quietly lost every pending task on Render's free tier every
+time the server redeployed or restarted — there's no persistent disk there. Upstash is
+a separate service, so it survives that.
+
+Setting it up (free, no credit card, a couple of minutes):
+1. [console.upstash.com](https://console.upstash.com) → sign up → **Create Database**.
+   Any region is fine; the free tier is plenty for this.
+2. On the database's page, find the **REST API** section. Copy `UPSTASH_REDIS_REST_URL`
+   and `UPSTASH_REDIS_REST_TOKEN` — shown right there, ready to paste.
+3. Set both as environment variables wherever this server runs (see below).
+
 ## Running it locally
 
 ```sh
 npm install
 cp .env.example .env
-# edit .env: set OPERATOR_API_KEY to a random secret, and PUBLIC_BASE_URL to
-# http://127.0.0.1:8787 for a local test
+# edit .env: set OPERATOR_API_KEY to a random secret, PUBLIC_BASE_URL to
+# http://127.0.0.1:8787 for a local test, and the two UPSTASH_* values from above
 npm start
 ```
 
@@ -80,9 +103,12 @@ npm start
    - `OPERATOR_API_KEY` — generate with `node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"`
    - `PUBLIC_BASE_URL` — the `https://your-service.onrender.com` URL Render gives you
      (set this *after* the first deploy, once you know the URL, then redeploy)
+   - `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` — from the Storage section
+     above. Without these, the server starts but every task fails to save.
 4. Render's free tier sleeps after inactivity and wakes on the next request (a few
    seconds of delay). That's fine for occasional liveness tasks; upgrade the plan if
-   it isn't.
+   it isn't. (This no longer affects stored tasks either way, now that they live in
+   Upstash rather than on Render's own disk.)
 
 Any other host that runs Node and gives you a public HTTPS URL works the same way —
 Render is just the least amount of setup.

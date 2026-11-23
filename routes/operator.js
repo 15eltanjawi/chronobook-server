@@ -10,6 +10,10 @@ const { buildLink } = require('../lib/link');
 
 const router = express.Router();
 
+// Express 4 does not catch a rejected promise from an async handler on its own -
+// without this, a storage error would hang the request instead of answering it.
+const ah = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+
 function requireOperator(req, res, next) {
   const key = req.header('x-operator-key');
   if (!safeEqual(key, process.env.OPERATOR_API_KEY || '')) {
@@ -25,7 +29,7 @@ function publicBase(req) {
 }
 
 // Create a new liveness task and get back the link to send to the customer's phone.
-router.post('/tasks', (req, res) => {
+router.post('/tasks', ah(async (req, res) => {
   const { appointmentId, note, ttlMinutes } = req.body || {};
   const base = publicBase(req);
   const id = randomId();
@@ -48,9 +52,9 @@ router.post('/tasks', (req, res) => {
     sessions: {},
     decision: null,
   };
-  store.put(task);
+  await store.put(task);
   res.json({ id: task.id, link: buildLink(base, task), expiresAt: task.expiresAt });
-});
+}));
 
 // Hand off the live Oz Forensics transaction the phone should complete: the exact
 // sessionToken/transactionId/webAdapterUrl BLS's own page just got for this
@@ -60,8 +64,8 @@ router.post('/tasks', (req, res) => {
 // plugin BLS's own page would have, for the same transaction — so whichever device
 // finishes it, BLS resolves the same transactionId. Call this right after creating
 // the task, or again if the token needs refreshing (Oz tokens are short-lived).
-router.post('/tasks/:id/session', (req, res) => {
-  const task = store.get(req.params.id);
+router.post('/tasks/:id/session', ah(async (req, res) => {
+  const task = await store.get(req.params.id);
   if (!task) return res.status(404).json({ error: 'not_found' });
   const { sessionToken, transactionId, webAdapterUrl } = req.body || {};
   if (!sessionToken || !transactionId || !webAdapterUrl) {
@@ -78,13 +82,13 @@ router.post('/tasks/:id/session', (req, res) => {
       task.message = 'Preparing the camera on the BLS page…';
     }
   }
-  store.put(task);
+  await store.put(task);
   res.json({ ok: true });
-});
+}));
 
 // Poll this for the extension's own UI and for the "auto-confirm, then show payment" step.
-router.get('/tasks/:id', (req, res) => {
-  const task = store.get(req.params.id);
+router.get('/tasks/:id', ah(async (req, res) => {
+  const task = await store.get(req.params.id);
   if (!task) return res.status(404).json({ error: 'not_found' });
   res.json({
     id: task.id,
@@ -98,7 +102,7 @@ router.get('/tasks/:id', (req, res) => {
     expiresAt: task.expiresAt,
     link: buildLink(publicBase(req), task),
   });
-});
+}));
 
 router.get('/tasks', (req, res) => {
   res.json({ tasks: [] }); // kept minimal on purpose; extend if a dashboard needs a list.
@@ -106,8 +110,8 @@ router.get('/tasks', (req, res) => {
 
 // The extension (or whoever actually checked the result against BLS) records the
 // final call here. The customer app's next poll reflects this.
-router.post('/tasks/:id/decision', (req, res) => {
-  const task = store.get(req.params.id);
+router.post('/tasks/:id/decision', ah(async (req, res) => {
+  const task = await store.get(req.params.id);
   if (!task) return res.status(404).json({ error: 'not_found' });
   const { decision, message } = req.body || {};
   if (!['accepted', 'rejected'].includes(decision)) {
@@ -118,18 +122,18 @@ router.post('/tasks/:id/decision', (req, res) => {
   task.message = message || (decision === 'accepted'
     ? 'BLS accepted your selfie. Your operator saved the result.'
     : 'BLS did not accept the result. Tap Try selfie again to repeat it while the link is valid.');
-  store.put(task);
+  await store.put(task);
   res.json({ ok: true });
-});
+}));
 
-router.post('/tasks/:id/cancel', (req, res) => {
-  const task = store.get(req.params.id);
+router.post('/tasks/:id/cancel', ah(async (req, res) => {
+  const task = await store.get(req.params.id);
   if (!task) return res.status(404).json({ error: 'not_found' });
   task.status = 'expired';
   task.message = 'This task was cancelled by the operator.';
   task.expiresAt = Date.now();
-  store.put(task);
+  await store.put(task);
   res.json({ ok: true });
-});
+}));
 
 module.exports = router;
